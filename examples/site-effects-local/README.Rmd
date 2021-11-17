@@ -1,0 +1,308 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(
+  collapse   = TRUE,
+  comment    = "#>",
+  fig.path   = "Readme_files/",
+  fig.align  = "center",
+  fig.width  = 6,
+  fig.height = 4,
+  out.width  = "60%",
+  echo       = FALSE,
+  message    = FALSE,
+  warning    = FALSE
+)
+
+# devtools::install_github("schalkdaniel/compboost", ref = "dev")
+devtools::load_all("~/repos/compboost")
+#library(compboost)
+library(ggplot2)
+
+ggplot2::theme_set(ggthemes::theme_gdocs())
+mycolor = ggthemes::scale_color_gdocs
+myfill = ggthemes::scale_fill_gdocs
+
+set.seed(31415)
+```
+# Feature site effects
+
+## Simulate data
+
+```{r}
+source(here::here("R/simulate-feature.R"))
+nsim    = 10000L
+n_sites = 6L
+
+dat = simulateFeature(n = nsim, n_sites = n_sites, bs_dim = 10L, offset = 10)
+SNR = 5
+
+dat$data$ynn = rnorm(nsim, dat$data$y, sd = sd(dat$data$y) / SNR)
+```
+
+### Main effect
+
+The main effect $b_{\text{main}}$ is simulated as spline:
+```{r}
+df_main = data.frame(x = dat$spline$main$x, y = dat$spline$main$y)
+ggplot(data = df_main, aes(x = x, y = y)) +
+  geom_line() +
+  ylab(expression(b[main]))
+```
+
+### Site effect
+
+Additionally, for each of the $K = `r n_sites`$ sites a site effect $b_{\text{site},k}$ is also simulated as a spline with a sum to zero constraint (is this a realistic assumption for our case???).
+```{r}
+ggs = lapply(dat$spline$site_effects, function(se) {
+  df = data.frame(x = se$x, y = se$y)
+  ggplot(data = df, aes(x = x, y = y)) + geom_line() +
+    ylab(expression(b[site]))
+})
+do.call(gridExtra::grid.arrange, c(ggs, ncol = 2L))
+```
+
+### Data for modelling
+
+The data used for modelling contains the `x`, `y`, and the `site` (denoted as $s$). The target variable `y` is simulated using the main effect and adding the site effect for the corresponding site:
+$$
+y^{(i)} = b_{\text{main}}(x^{(i)}) + \sum_{k=1}^K \delta_{k}(s^{(i)}) b_{\text{site},k}(x^{(i)})
+$$
+```{r, echo=FALSE}
+knitr::kable(dat$data[1:10, ])
+```
+
+## Define model
+
+```{r cboost-specs}
+mstop = 10000L
+learning_rate = 0.1
+df = 5
+n_knots = 20L
+```
+
+The base learner added to the model is first a P-spline with $df = `r df`$ and `r n_knots` knots. Then, a tensor product multiplying the spline base with a dummy coded design matrix with a ridge penalty for the site is added. The degrees of freedom of the ridge base learner is 1.
+
+```{r}
+dsx = InMemoryData$new(cbind(dat$data$x), "x")
+dsc = CategoricalDataRaw$new(dat$data$site, "c")
+
+blx = BaselearnerPSpline$new(dsx, "spline", list(df = df, n_knots = n_knots))
+blc = BaselearnerCategoricalRidge$new(dsc, "category", list(df = 1))
+
+tensor1 = BaselearnerTensor$new(blx, blc, "tensor")
+
+fl = BlearnerFactoryList$new()
+
+fl$registerFactory(blx)
+fl$registerFactory(tensor1)
+
+loss = LossQuadratic$new()
+optimizer = OptimizerCoordinateDescent$new()
+
+newdata_full  = list(dsx, dsc)
+response_full = ResponseRegr$new("y", cbind(dat$data$y))
+
+log_iterations = LoggerIteration$new("iter", TRUE, mstop)
+log_oob        = LoggerOobRisk$new("oob", TRUE, loss, 0.00, 10, newdata_full, response_full)
+
+# Define new logger list:
+logger_list = LoggerList$new()
+
+# Register the logger:
+logger_list$registerLogger(log_iterations)
+logger_list$registerLogger(log_oob)
+
+cboost = Compboost_internal$new(
+  response      = ResponseRegr$new("y", cbind(dat$data$yn)),
+  learning_rate = learning_rate,
+  stop_if_all_stopper_fulfilled = FALSE,
+  factory_list = fl,
+  loss         = loss,
+  logger_list  = logger_list,
+  optimizer    = optimizer
+)
+
+cboost$train(trace = 500)
+
+# Because we do not use the R6 API, we have to wrap the cboost
+# object to use some plotting functionality:
+mod = list(model = cboost)
+mod$getSelectedBaselearner = cboost$getSelectedBaselearner
+
+ldata = data.frame(rinbag = cboost$getRiskVector()[-1],
+  rval = cboost$getLoggerData()[[2]][,2])
+ldata$iter = seq_len(nrow(ldata))
+
+if (FALSE) {
+
+### Comparison to mboost
+### ====================================================
+
+library(mboost)
+mdat = dat$data
+mdat$site = as.factor(mdat$site)
+
+time = proc.time()
+mmod = mboost(yn ~ bbs(x, df = 10) + bbs(x, df = 10) %X% brandom(site, df = 1), data = mdat,
+  control = boost_control(mstop = length(cboost$getSelectedBaselearner()), nu = 0.1))
+time = proc.time() - time
+
+plot(x = predict(mmod), y = cboost$getPrediction(TRUE), col = rgb(0, 0, 0, 0.2))
+abline(a = 0, b = 1, col = "dark red")
+
+table(cboost$getSelectedBaselearner())
+table(mmod$xselect())
+
+
+## Spline base learner
+## ------------------------------------------------------
+
+mbbs = bbs(mdat$x, df = 10)
+
+## Design
+Xc_spline = t(blx$getData())
+Xm_spline = as.matrix(extract(mbbs, "design"))
+
+all.equal(Xc_spline, Xm_spline, check.attributes = FALSE)
+
+## Penalty
+Pc_spline = blx$getPenalty()
+
+mdpp_bbs = mbbs$dpp(rep(1, nrow(mdat)))
+Pm_spline = as.matrix(extract(mbbs, "penalty")) * mdpp_bbs$df()[2]
+all.equal(Pm_spline, Pc_spline, check.attributes = FALSE)
+
+
+## Ridge base learner
+## ------------------------------------------------------
+
+mbrandom = with(mdat, brandom(site, df = 1))
+
+## Design
+Xc_cat = t(blc$getData())
+
+Xm_cat = as.matrix(extract(mbrandom, "design"))
+uidx = apply(Xm_cat, 2L, function(x) which(x == 1))
+cidx = uidx[paste0("site", mdat$site)]
+Xm_cat = Xm_cat[cidx, ]
+
+xtxc = t(Xc_cat) %*% Xc_cat
+xtxm = t(Xm_cat) %*% Xm_cat
+
+all.equal(sort(diag(xtxc)), sort(diag(xtxm)), check.attributes = FALSE)
+
+## Penalty
+Pc_cat = blc$getPenalty()
+Pm_cat = as.matrix(extract(mbrandom, "penalty"))
+
+clambda = Pc_cat[1]
+
+mdpp_brandom = mbrandom$dpp(rep(1, nrow(mdat)))
+mlambda = mdpp_brandom$df()[2]
+
+all.equal(clambda, mlambda, check.attributes = FALSE)
+all.equal(Pc_cat, Pm_cat * mlambda)
+
+## Tensor base learner
+## ------------------------------------------------------
+
+mtensor = mmod$baselearner[[2]]
+
+## Design
+Xm_tensor = as.matrix(extract(mtensor, "design"))
+Xc_tensor = t(tensor1$getData())
+
+all.equal(sort(Xm_tensor), sort(Xc_tensor))
+
+## Penalty
+mdpp_tensor = mtensor$dpp(rep(1, nrow(mdat)))
+
+mboostPenaltyKronecker1 = function(K1, K2) kronecker(K1, diag(ncol(K2))) + kronecker(diag(ncol(K1)), K2)
+
+Pc_tensor = penaltySumKronecker(blx$getPenalty(), blc$getPenalty())
+Pc_tensor1 = mboostPenaltyKronecker1(blx$getPenalty(), blc$getPenalty())
+
+all.equal(Pc_tensor, Pc_tensor1)
+
+Pm_tensor = as.matrix(extract(mdpp_tensor, "penalty")) * mdpp_tensor$df()[2]
+
+mboost:::df2lambda(X = Xm_tensor, df = 10, dmat = Pm_tensor, weights = rep(1, nrow(mdat)), XtX = a)
+
+all.equal(Pm_tensor, Pc_tensor, check.attributes = FALSE)
+
+Pm_tensor[1:10, 1:10]
+Pc_tensor[1:10, 1:10]
+}
+```
+
+### Risk and selected base learner
+
+```{r, fig.width=12, out.width="100%"}
+gg1 = ggplot(ldata, aes(x = iter)) +
+  geom_line(aes(y = rinbag, color = "Train risk")) +
+  geom_line(aes(y = rval, color = "Validation risk")) +
+  mycolor() + myfill() + ylab("Risk") + xlab("Iteration") +
+  labs(color = "Base learner")
+gg2 = plotBaselearnerTraces(mod) + mycolor() + myfill() + labs(fill = "Base learner")
+gridExtra::grid.arrange(gg1, gg2, ncol = 2L)
+```
+
+### Prediction for main and site effects
+
+```{r, fig.width=12, fig.height=8, out.width="100%"}
+df = dat$data
+df$y_main        = dat$splines$main$y
+df$y_pred_main   = as.numeric(cboost$getOffset()) + cboost$predictFactoryTrainData("x_spline")
+df$y_pred_tensor = cboost$predictFactoryTrainData("x_c_tensor")
+
+gg_main = ggplot() +
+  geom_line(data = df, aes(x = x, y = y_pred_main, color = "Predicted effect")) +
+  geom_line(data = df, aes(x = x, y = y_main, color = "True effect")) +
+  ggtitle("Main effect") +
+  ylab(expression(b[main])) +
+  mycolor() + labs(color = "")
+
+ggs = lapply(unique(dat$data$site), function(i) {
+  df_tmp  = df[df$site == i, ]
+  df_site = data.frame(x = dat$splines$site_effects[[i]]$x,
+    y = dat$splines$site_effects[[i]]$y)
+
+  ggplot() +
+    geom_line(data = df_tmp, mapping = aes(x = x, y = y_pred_tensor, color = "Predicted effect")) +
+    geom_line(data = df_site, mapping = aes(x = x, y = y, color = "True effect")) +
+    ggtitle(paste0("Site ", i)) + mycolor() + ylab(expression(b[site])) +
+    labs(color = "")
+})
+
+n_pentry = n_sites * 2 + 4
+if ((n_pentry %% 4) != 0) n_pentry = n_pentry + 2L
+
+pmatrix = rep(NA_integer_, n_pentry)
+pmatrix[seq_len(n_sites * 2 + 4)] = c(c(NA, 1, 1, NA), rep(seq(2, 1 + n_sites), each = 2L))
+pmatrix = matrix(data = pmatrix, ncol = 4L, byrow = TRUE)
+do.call(gridExtra::grid.arrange, c(c(list(gg_main), ggs), list(layout_matrix = pmatrix)))
+```
+
+
+## Overall prediction
+
+```{r, fig.width=12, out.width="100%"}
+df_all = data.frame(x = df$x, y_real = df$yn, y_pred = cboost$getPrediction(TRUE),
+  site = as.factor(df$site))
+
+gg1 = ggplot(df_all, aes(x = y_real, y = y_pred, color = site)) +
+  geom_abline(slope = 1, color = "dark red", linetype = "dashed") +
+  geom_point(alpha = 0.05) + mycolor() +
+  ggtitle("Truth vs. predicted")
+
+gg2 = ggplot(df_all, aes(x = x, y = y_real - y_pred, color = site)) +
+  geom_point(alpha = 0.05) + mycolor() +
+  ggtitle("Residuals")
+
+gridExtra::grid.arrange(gg1, gg2, ncol = 2)
+```

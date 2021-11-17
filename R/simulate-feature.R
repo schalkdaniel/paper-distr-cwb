@@ -1,14 +1,61 @@
+src_pen = "
+arma::mat penaltySumKronecker (const arma::mat& Pa, const arma::mat& Pb)
+{
+  // Variables
+  arma::mat out;
+
+  // Create Diagonal matrices
+  arma::mat eyePa = arma::diagmat( arma::vec(Pa.n_cols, arma::fill::ones) );
+  arma::mat eyePb = arma::diagmat( arma::vec(Pb.n_cols, arma::fill::ones) );
+
+  // sum of Kroneckers with diagonal marices
+  out = arma::kron(Pa, eyePb) + arma::kron(eyePa, Pb);
+
+  return out;
+}"
+
+src_center = "
+arma::mat centerDesignMatrix (const arma::mat& X1, const arma::mat& X2)
+{
+  // Cross Product X1 and X2
+  arma::mat cross = X1.t() * X2;
+
+  // QR decomp
+  // We require and orthogonal matrix Q
+  arma::mat R;
+  arma::mat Q;
+  arma::qr(Q,R,cross);
+
+  // get rank of R and add 1
+  int rankR = arma::rank(R);
+
+  // construct Z from rows 0 to last row and column R+1 to last column
+  arma::mat Z = Q.cols(rankR,Q.n_cols-1);
+
+  return Z;
+}"
+
+Rcpp::cppFunction(src_pen, "RcppArmadillo")
+Rcpp::cppFunction(src_center, "RcppArmadillo")
+
 #' Get linear predictor from B-spline.
 #'
 #' @param x [numeric] Vector of x values
-#' @param bs_dim [integer(1)] Number of base functions for the spline (default = 10L). (Corresponds to number of inner knots for the spline).
-#' @param sigma [numeric(1)] Standard deviation for the normally distributed random variable from which the parameter are drawn (default = 3).
-#' @param offset [numeric(1)] Shift on the y-axis of the linear predictor (default = 0).
-#' @return The sum of \code{x} and \code{y}.
-simSpline = function(x, bs_dim = 10L, sigma = 3, offset = 0, ...) {
+#' @param bs_dim [integer(1)] Number of base functions for the spline
+#'   (default = 10L). (Corresponds to number of inner knots for
+#'   the spline).
+#' @param sigma [numeric(1)] Standard deviation for the normally
+#'   distributed random variable from which the parameter are
+#'   drawn (default = 3).
+#' @param offset [numeric(1)] Shift on the y-axis of the linear
+#'   predictor (default = 0).
+#' @param stz [logical(1)] Sum to zero constraint for the spline.
+#' @return A list with \code{x}, \code{y}, and specific information
+#'   about the spline such as parameter.
+simSpline = function(x, bs_dim = 10L, sigma = 3, offset = 0, stz = FALSE) {
   checkmate::assertNumeric(x = sigma, len = 1L)
   checkmate::assertNumeric(x = offset, len = 1L)
-  if (bs_dim < 7) stop("Need bs_dim >= 7 !")
+  #if (bs_dim < 7) stop("Need bs_dim >= 7 !")
 
   nk = bs_dim - 2
 
@@ -24,14 +71,24 @@ simSpline = function(x, bs_dim = 10L, sigma = 3, offset = 0, ...) {
 
   # create the spline basis functions
   X = splines::spline.des(kn, x, 4, x * 0)$design
+  if (stz)
+    X = X %*% centerDesignMatrix(X, cbind(rep(1, nrow(X))))
 
   # multiply with random coefficients to get random functions
-  coefs = rnorm(bs_dim, sd = sigma)
+  coefs = rnorm(ncol(X), sd = sigma)
 
   return (list(y = X %*% coefs + offset, x = x, X = X, offset = offset, coefs = coefs, knots = kn))
 }
 
-simulateFeature = function(n = 1000L, n_sites = 3L, from = NULL, to = NULL, ...) {
+#' Simulate feature with site specific effects
+#'
+#' @param n       [integer(1)] Number of observations.
+#' @param n_sites [integer(1)] Number sites (randomly drawn).
+#' @param from    [numeric(1)] Lower boundary of the feature.
+#' @param up      [numeric(1)] Upper boundary of the feature.
+#' @return A list with \code{x}, \code{y}, the site, and specific
+#'   information about all splines (for main and site effects).
+simulateFeature = function(n = 1000L, n_sites = 3L, from = NULL, to = NULL, offset = 0, ...) {
   checkmate::assertIntegerish(x = n, len = 1L)
   checkmate::assertIntegerish(x = n_sites, len = 1L)
 
@@ -41,16 +98,18 @@ simulateFeature = function(n = 1000L, n_sites = 3L, from = NULL, to = NULL, ...)
   checkmate::assertNumeric(x = from, len = 1L, upper = to)
   checkmate::assertNumeric(x = to, len = 1L, lower = from)
 
-
   x = seq(from = from, to = to, length.out = n)
-  main_effect = simSpline(x, ...)
+  main_effect = simSpline(x, offset = offset, ...)
 
   idx_sites = sample(seq_len(n_sites), n, TRUE)
-  site_effects = lapply(seq_len(n_sites), function(i) simSpline(x[idx_sites == i], ...))
+  site_effects = lapply(seq_len(n_sites), function(i) simSpline(x[idx_sites == i],
+    offset = 0, stz = TRUE, ...))
 
   y = main_effect$y
   for (i in seq_len(n_sites)) {
-    y[idx_sites == i] = site_effects[[i]]$y
+    site_effects[[i]]$y = site_effects[[i]]$y - mean(site_effects[[i]]$y)
+    y_site = site_effects[[i]]$y
+    y[idx_sites == i] = y[idx_sites == i] + y_site
   }
 
   out = list()
@@ -59,75 +118,3 @@ simulateFeature = function(n = 1000L, n_sites = 3L, from = NULL, to = NULL, ...)
 
   return(out)
 }
-
-
-devtools::install_github("schalkdaniel/compboost", ref = "dev")
-library(compboost)
-
-dat = simulateFeature()
-
-# Define data:
-dsx = InMemoryData$new(cbind(dat$data$x), "x")
-dsc = CategoricalDataRaw$new(dat$data$site, "c")
-
-facx = BaselearnerPSpline$new(dsx, "spline", list(df = 10, n_knots = 10))
-facc = BaselearnerCategoricalRidge$new(dsc, "category", list(df = 1))
-
-tensor1 = BaselearnerTensor$new(facx, facc, "tensor")
-
-fl = BlearnerFactoryList$new()
-
-fl$registerFactory(facx)
-fl$registerFactory(tensor1)
-
-loss = LossQuadratic$new()
-optimizer = OptimizerCoordinateDescent$new()
-
-log_iterations = LoggerIteration$new("iter", TRUE, 2000)
-
-# Define new logger list:
-logger_list = LoggerList$new()
-
-# Register the logger:
-logger_list$registerLogger(log_iterations)
-
-cboost = Compboost_internal$new(
-  response      = ResponseRegr$new("y", cbind(dat$data$y)),
-  learning_rate = 0.05,
-  stop_if_all_stopper_fulfilled = FALSE,
-  factory_list = fl,
-  loss         = loss,
-  logger_list  = logger_list,
-  optimizer    = optimizer
-)
-
-cboost$train(trace = TRUE)
-
-# Dummy to plot baselearner traces
-mod = list(model = cboost)
-mod$getSelectedBaselearner = cboost$getSelectedBaselearner
-
-plotBaselearnerTraces(mod)
-
-df = dat$data
-df$y_pred_tensor = cboost$predictFactoryTrainData("x_c_tensor")
-df$y_pred_main   = cboost$predictFactoryTrainData("x_spline")
-df$y_main        = dat$splines$main$y
-
-gg_main = ggplot() +
-  geom_line(data = df, aes(x = x, y = y_pred_main, color = "Predicted effect")) +
-  geom_line(data = df, aes(x = x, y = y_main, color = "True effect")) +
-  ggtitle("Main effect")
-
-ggs = lapply(unique(dat$data$site), function(i) {
-  df_tmp  = df[df$site == i, ]
-  df_site = data.frame(x = dat$splines$site_effects[[i]]$x,
-                       y = dat$splines$site_effects[[i]]$y)
-
-  ggplot() +
-    geom_line(data = df_tmp, mapping = aes(x = x, y = y_pred_tensor + y_pred_main, color = "Predicted effect")) +
-    geom_line(data = df_site, mapping = aes(x = x, y = y, color = "True effect")) +
-    ggtitle(paste0("Site ", i))
-})
-
-do.call(gridExtra::grid.arrange, c(list(gg_main), ggs))
