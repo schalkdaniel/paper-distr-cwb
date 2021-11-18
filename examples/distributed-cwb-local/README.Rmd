@@ -28,14 +28,30 @@ knitr::opts_chunk$set(
     - Categorial base learner via dummy coding and ridge penalty
     - Row wise Kronecker product
 
-## Initialization step
+## Initialization stage
 
 Since initializing base learner often requires knoledge about the pooled feature we have to consider:
-- Splines: Min and max calculation for the whole feature to calculate equal knots for all sites.
-- Categorical Ridge: All groups of the categorical feature to build the 0-1-design matrix.
+- Splines:
+    - Min. and max. calculation for the whole feature to calculate equal knots for all sites.
+    - __Shared data:__ Min. and max. value.
+- Categorical
+    - Ridge: All groups of the categorical feature to build the 0-1-design matrix.
+    - __Shared data:__ Groups at the site.
 - For both base learner: The penalty depending on the degrees of freedom needs to be calculated on the "global" $X^TX$ matrix.
 
 After calculating these properties and sharing them with all sites, we can calculate the design matrices at each site required for modelling.
 
-## Data stored at the host
+## Data at the host
 
+In order to estimate the parameters, the penalty $\lambda$ and penalty matrix $K$ per base learner to conduct $(F + \lambda K)^{-1}s$ with is kept at the host.
+$$
+F = \sum_{k=1}^K F_k, \qquad F_k = X_k^TX_k
+$$
+s
+$$
+s = \sum_{k=1}^K s_k, \qquad s_k = X_k^Ty_k
+$$
+
+## Fitting stage
+
+-
