@@ -32,6 +32,12 @@ Baselearner = R6Class("Baselearner",
     getDF = function() {
       return(private$df)
     },
+    setPenalty = function(penalty) {
+      checkmate::assertNumeric(penalty, len = 1L, lower = 0)
+      if (! is.null(private$penalty))
+        stop("Penalty was already set.")
+      private$penalty = penalty
+    },
     getPenalty = function() {
       return(private$penalty)
     },
@@ -72,7 +78,7 @@ BaselearnerPSpline = R6Class("BaselearnerPSpline",
       private$ord = ord
       private$derivs = derivs
     },
-    initDesign = function(dat, knots) {
+    initDesign = function(dat, knots, set_penalty = FALSE) {
       checkmate::assertNumeric(knots)
       private$knots = knots
 
@@ -81,8 +87,10 @@ BaselearnerPSpline = R6Class("BaselearnerPSpline",
           private$ord, knots))
 
         private$penalty_mat = compboostSplines::penaltyMat(ncol(super$getXtX()), private$derivs)
-        private$penalty = compboostSplines::demmlerReinsch(private$xtx,
-          private$penalty_mat, private$df)
+        if (set_penalty) {
+          private$penalty = compboostSplines::demmlerReinsch(private$xtx,
+            private$penalty_mat, private$df)
+        }
 
         private$locked = TRUE
       }

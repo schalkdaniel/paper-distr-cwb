@@ -57,14 +57,21 @@ Site = R6Class("Site",
 
       return(invisible(NULL))
     },
-    communicate = function() {
+    communicateFittingParts = function() {
       if ((private$is_initialized_bl + private$is_initialized_offset) == 0)
         stop("Initialize prediction and base learner first.")
 
       out = lapply(private$bls, function(bl) {
-        list(XtX = bl$getXtX(), Xtu = bl$getXty(private$pr), pen = bl$getPenalty(),
-          K = bl$getPenaltyMat())
+        list(XtX = bl$getXtX(), pen = bl$getPenalty(),
+          K = bl$getPenaltyMat(), df = bl$getDF())
       })
+      return(out)
+    },
+    communicateXtu = function() {
+      if ((private$is_initialized_bl + private$is_initialized_offset) == 0)
+        stop("Initialize prediction and base learner first.")
+
+      out = lapply(private$bls, function(bl) list(Xtu = bl$getXty(private$pr)))
       return(out)
     },
     communicateInit = function() {
@@ -79,6 +86,12 @@ Site = R6Class("Site",
       out = aggregator(private$data[[private$cwb$getTarget()]], ...)
       checkmate::assertNumeric(out, len = 1L)
       return(out)
+    },
+    #' @param penalty [`numeric(1L)`] Penalty used for each base learner
+    initPenalty = function(penalty) {
+      checkmate::assertNumeric(penalty, len = 1L, lower = 0)
+      nuisance = lapply(private$bls, function(bl) bl$setPenalty(penalty))
+      return(invisible(NULL))
     },
     #' @param offset [`numeric(1L)`] Constant initialization for the prediction
     initPrediction = function(offset) {

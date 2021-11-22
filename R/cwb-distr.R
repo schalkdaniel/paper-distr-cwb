@@ -3,6 +3,7 @@ library(R6)
 source(here::here("R/baselearner.R"))
 source(here::here("R/cwb.R"))
 source(here::here("R/site.R"))
+source(here::here("R/host.R"))
 
 nsim = 1000L
 x = runif(nsim, 0, 10)
@@ -27,64 +28,56 @@ cwb = CWB$new("y", lr = 0.1, loss = loss, dloss = dloss)
 sites = lapply(unique(svec), function(s) {
   Site$new(s, dat[svec == s, ], cwb, bls) })
 
-# First Aggregation:
-init = lapply(sites, function(site) site$communicateInit())
-str(init)
-blns = sapply(bls, function(bl) bl$getName())
-init_agg = lapply(blns, function(bln) {
-  sinit = lapply(init, function(i) i[[bln]])
-  if (grepl("spline", bln)) {
-    smin = min(sapply(sinit, function(s) s$min))
-    smax = max(sapply(sinit, function(s) s$max))
-    out = compboostSplines::createKnots(c(smin, smax), n_knots = 10L, degree = 3)
-  }
-  out = list(knots = out)
-  return(out)
-})
-names(init_agg) = blns
 
-# Initialize base learner:
-nuisance = lapply(sites, function(s) s$initBaselearner(init_agg))
+host = Host$new(cwb, bls, sites)
 
-# Initialize prediction:
-ss = sapply(sites, function(s) s$getAggregatedInitialization(function(y) mean(y)))
-sw = sapply(sites, function(s) s$nrow())
-offset = weighted.mean(ss, sw)
+host$initializePrediction()
+host$initializeBaselearner()
 
-nuisance = lapply(sites, function(s) s$initPrediction(offset))
-
-
-mstop = 20L
+mstop = 1000L
 for (m in seq_len(mstop)) {
-  # Calculate params
-  receive = lapply(sites, function(s) s$communicate())
-  blparams = lapply(blns, function(bln) {
-    blp = lapply(receive, function(r) r[[bln]] )
-    XtX = Reduce("+", lapply(blp, function(b) b$XtX))
-    Xtu = Reduce("+", lapply(blp, function(b) b$Xtu))
-    pK = blp[[1]]$K * blp[[1]]$pen
-    return(solve(XtX + pK) %*% Xtu)
-  })
-  names(blparams) = blns
-
-  # Get SSEs:
-  sses = sapply(blns, function(bln) {
-    bp = blparams[[bln]]
-    sum(sapply(sites, function(s) {
-      s$ssePrUpdate(bln, bp)
-    }))
-  })
-  names(sses) = blns
-
-  bl_best = which.min(sses)
-
-  # Site models:
-  nuisance = lapply(sites, function(s) {
-    s$update(names(bl_best), blparams[[names(bl_best)]])
-  })
-  # Host model:
-  cwb$update(names(bl_best), blparams[[names(bl_best)]])
-
-  rr = weighted.mean(sapply(sites, function(s) s$communicateRisk()), sw)
-  cat(m, "/", mstop, ": ", rr, "\n", sep = "")
+  host$updateCWB(m)
 }
+host$cwb$getBlTrace()
+host$cwb$getBlMap()
+
+
+### Testing:
+blst = bls
+d0 = dat
+
+lapply(blst, function(bl) bl$initDesign(d0, host$init_aggr$x_spline$knots))
+d0$pred = host$offset + blst[[1]]$linPred(host$cwb$getBlMap()[["x_spline"]])
+
+library(ggplot2)
+
+ggplot(d0) +
+  geom_point(aes(x = x, y = y, color = "Truth")) +
+  geom_line(aes(x = x, y = pred, color = "Predicted"))
+
+
+## Compare to compboost:
+devtools::load_all("~/repos/compboost")
+cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
+  learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
+  differences = 2)
+
+all.equal(cboost$baselearner_list$x_spline$factory$getPenaltyMat(),
+  host$bl_parts$x_spline$K)
+
+all.equal(cboost$baselearner_list$x_spline$factory$getPenalty(),
+  host$bl_parts$x_spline$pen)
+
+all.equal(check.attributes = FALSE,
+  cboost$baselearner_list$x_spline$factory$getData() %*% t(cboost$baselearner_list$x_spline$factory$getData()),
+   host$bl_parts$x_spline$XtX)
+
+cf_cboost = cboost$getEstimatedCoef()
+cf_dist   = host$cwb$getBlMap()
+
+cf_cboost$offset
+host$offset
+
+all.equal(cf_cboost$x_spline, cf_dist$x_spline, check.attributes = FALSE)
+all.equal(cboost$model$getRiskVector()[-1], host$risk)
+
