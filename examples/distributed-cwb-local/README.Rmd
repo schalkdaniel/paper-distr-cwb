@@ -148,7 +148,7 @@ d0$pred = host$offset + blst[[1]]$linPred(host$cwb$getBlMap()[["x_spline"]])
 library(ggplot2)
 
 ggplot(d0) +
-  geom_point(aes(x = x, y = y, color = "Truth")) +
+  geom_point(aes(x = x, y = y, color = "Truth"), alpha = 0.2) +
   geom_line(aes(x = x, y = pred, color = "Predicted"))
 ```
 

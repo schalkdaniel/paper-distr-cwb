@@ -87,17 +87,17 @@ F_j = \sum_{k=1}^K F_{k,j}, \qquad F_{k,j} = X_{k,j}^TX_{k,j}
 str(host$init_aggr)
 #> List of 1
 #>  $ x_spline:List of 1
-#>   ..$ knots: num [1:16, 1] -1.80803 -0.89991 0.00821 0.91633 1.82445 ...
+#>   ..$ knots: num [1:16, 1] -1.80855 -0.90055 0.00744 0.91544 1.82343 ...
 str(host$bl_parts)
 #> List of 1
 #>  $ x_spline:List of 4
-#>   ..$ XtX: num [1:13, 1:13] 3.792 8.904 0.759 0 0 ...
+#>   ..$ XtX: num [1:13, 1:13] 6.537 13.145 0.869 0 0 ...
 #>   ..$ K  : num [1:13, 1:13] 1 -2 1 0 0 0 0 0 0 0 ...
 #>   ..$ df : num 4
-#>   ..$ pen: num 553
+#>   ..$ pen: num 583
 
 host$offset
-#> [1] 0.1638
+#> [1] 0.1556
 ```
 
 ## Fitting stage
@@ -122,7 +122,7 @@ for (m in seq_len(mstop)) {
   trace = c(trace, capture.output(host$updateCWB(m)))
 }
 cat(tail(trace), sep = "")
-#> 995: 0.02082996: 0.02082997: 0.02082998: 0.02082999: 0.020821000: 0.02082
+#> 995: 0.01941996: 0.01941997: 0.01941998: 0.01941999: 0.019411000: 0.01941
 ```
 
 ## Check the algorithm
@@ -138,16 +138,16 @@ str(host$cwb$getBlTrace()[1:3])
 #> List of 3
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:13, 1] 0.8164 0.6017 0.3731 0.0932 -0.2087 ...
+#>   ..$ param: num [1:13, 1] 0.6549 0.4755 0.28 0.0332 -0.2373 ...
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:13, 1] 0.7385 0.5488 0.3449 0.0885 -0.1938 ...
+#>   ..$ param: num [1:13, 1] 0.592 0.4346 0.2609 0.0346 -0.2191 ...
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:13, 1] 0.6672 0.5004 0.3191 0.0843 -0.1799 ...
+#>   ..$ param: num [1:13, 1] 0.5344 0.3971 0.2434 0.0359 -0.2024 ...
 str(host$cwb$getBlMap())
 #> List of 1
-#>  $ x_spline: num [1:13, 1] -0.564 0.308 0.925 0.726 -0.225 ...
+#>  $ x_spline: num [1:13, 1] -0.5 0.31 0.88 0.673 -0.195 ...
 ```
 
 Visualizing the estimated effect reveals an accurate effect estimation:
@@ -165,7 +165,7 @@ d0$pred = host$offset + blst[[1]]$linPred(host$cwb$getBlMap()[["x_spline"]])
 library(ggplot2)
 
 ggplot(d0) +
-  geom_point(aes(x = x, y = y, color = "Truth")) +
+  geom_point(aes(x = x, y = y, color = "Truth"), alpha = 0.2) +
   geom_line(aes(x = x, y = pred, color = "Predicted"))
 ```
 
@@ -182,16 +182,16 @@ devtools::load_all("~/repos/compboost")
 cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
   learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
   differences = 2, trace = 200L)
-#>    1/1000   risk = 0.23  time = 0   
-#>  200/1000   risk = 0.022  time = 11262   
-#>  400/1000   risk = 0.021  time = 23511   
-#>  600/1000   risk = 0.021  time = 36757   
-#>  800/1000   risk = 0.021  time = 51116   
-#> 1000/1000   risk = 0.021  time = 67259   
+#>    1/1000   risk = 0.24  time = 0   
+#>  200/1000   risk = 0.02  time = 10793   
+#>  400/1000   risk = 0.02  time = 22488   
+#>  600/1000   risk = 0.019  time = 35395   
+#>  800/1000   risk = 0.019  time = 49378   
+#> 1000/1000   risk = 0.019  time = 64591   
 #> 
 #> 
 #> Train 1000 iterations in 0 Seconds.
-#> Final risk based on the train set: 0.021
+#> Final risk based on the train set: 0.019
 
 all.equal(cboost$baselearner_list$x_spline$factory$getPenaltyMat(),
   host$bl_parts$x_spline$K)
