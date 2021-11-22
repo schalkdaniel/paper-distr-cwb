@@ -28,7 +28,7 @@ source(here::here("R/host.R"))
 nsim = 1000L
 x = runif(nsim, 0, 10)
 svec = sample(LETTERS[1:4], nsim, TRUE)
-dat = data.frame(x = x, y = sin(x))
+dat = data.frame(x = x, y = rnorm(nsim, sin(x), 0.2))
 
 # CWB structure:
 bl_spline  = BaselearnerPSpline$new("x", ord = 2)
@@ -87,17 +87,17 @@ F_j = \sum_{k=1}^K F_{k,j}, \qquad F_{k,j} = X_{k,j}^TX_{k,j}
 str(host$init_aggr)
 #> List of 1
 #>  $ x_spline:List of 1
-#>   ..$ knots: num [1:16, 1] -1.7993 -0.8923 0.0147 0.9217 1.8287 ...
+#>   ..$ knots: num [1:16, 1] -1.80803 -0.89991 0.00821 0.91633 1.82445 ...
 str(host$bl_parts)
 #> List of 1
 #>  $ x_spline:List of 4
-#>   ..$ XtX: num [1:13, 1:13] 5.206 11.31 0.758 0 0 ...
+#>   ..$ XtX: num [1:13, 1:13] 3.792 8.904 0.759 0 0 ...
 #>   ..$ K  : num [1:13, 1:13] 1 -2 1 0 0 0 0 0 0 0 ...
 #>   ..$ df : num 4
-#>   ..$ pen: num 571
+#>   ..$ pen: num 553
 
 host$offset
-#> [1] 0.207
+#> [1] 0.1638
 ```
 
 ## Fitting stage
@@ -122,7 +122,7 @@ for (m in seq_len(mstop)) {
   trace = c(trace, capture.output(host$updateCWB(m)))
 }
 cat(tail(trace), sep = "")
-#> 995: 0.00003765996: 0.00003761997: 0.00003757998: 0.00003754999: 0.00003751000: 0.00003746
+#> 995: 0.02082996: 0.02082997: 0.02082998: 0.02082999: 0.020821000: 0.02082
 ```
 
 ## Check the algorithm
@@ -138,16 +138,16 @@ str(host$cwb$getBlTrace()[1:3])
 #> List of 3
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:13, 1] 0.7054 0.5249 0.3277 0.0715 -0.2143 ...
+#>   ..$ param: num [1:13, 1] 0.8164 0.6017 0.3731 0.0932 -0.2087 ...
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:13, 1] 0.6362 0.4783 0.3037 0.0688 -0.199 ...
+#>   ..$ param: num [1:13, 1] 0.7385 0.5488 0.3449 0.0885 -0.1938 ...
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:13, 1] 0.5729 0.4357 0.2817 0.0664 -0.1848 ...
+#>   ..$ param: num [1:13, 1] 0.6672 0.5004 0.3191 0.0843 -0.1799 ...
 str(host$cwb$getBlMap())
 #> List of 1
-#>  $ x_spline: num [1:13, 1] -0.59 0.267 0.876 0.645 -0.26 ...
+#>  $ x_spline: num [1:13, 1] -0.564 0.308 0.925 0.726 -0.225 ...
 ```
 
 Visualizing the estimated effect reveals an accurate effect estimation:
@@ -181,52 +181,17 @@ distributed algorithm:
 devtools::load_all("~/repos/compboost")
 cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
   learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
-  differences = 2)
-#>    1/1000   risk = 0.21  time = 0   
-#>   25/1000   risk = 0.081  time = 1337   
-#>   50/1000   risk = 0.041  time = 2644   
-#>   75/1000   risk = 0.022  time = 3960   
-#>  100/1000   risk = 0.011  time = 5293   
-#>  125/1000   risk = 0.006  time = 6632   
-#>  150/1000   risk = 0.0033  time = 8005   
-#>  175/1000   risk = 0.0018  time = 9383   
-#>  200/1000   risk = 0.0011  time = 10772   
-#>  225/1000   risk = 0.00065  time = 12209   
-#>  250/1000   risk = 0.00042  time = 13634   
-#>  275/1000   risk = 0.00029  time = 15088   
-#>  300/1000   risk = 0.00022  time = 16570   
-#>  325/1000   risk = 0.00017  time = 18072   
-#>  350/1000   risk = 0.00015  time = 19584   
-#>  375/1000   risk = 0.00013  time = 21119   
-#>  400/1000   risk = 0.00011  time = 22666   
-#>  425/1000   risk = 0.0001  time = 24225   
-#>  450/1000   risk = 9.3e-05  time = 25802   
-#>  475/1000   risk = 8.6e-05  time = 27387   
-#>  500/1000   risk = 8e-05  time = 28988   
-#>  525/1000   risk = 7.6e-05  time = 30580   
-#>  550/1000   risk = 7.1e-05  time = 32172   
-#>  575/1000   risk = 6.8e-05  time = 33776   
-#>  600/1000   risk = 6.4e-05  time = 35399   
-#>  625/1000   risk = 6.1e-05  time = 37033   
-#>  650/1000   risk = 5.9e-05  time = 38686   
-#>  675/1000   risk = 5.6e-05  time = 40352   
-#>  700/1000   risk = 5.4e-05  time = 42036   
-#>  725/1000   risk = 5.2e-05  time = 43735   
-#>  750/1000   risk = 5e-05  time = 45455   
-#>  775/1000   risk = 4.9e-05  time = 47187   
-#>  800/1000   risk = 4.7e-05  time = 48935   
-#>  825/1000   risk = 4.5e-05  time = 50733   
-#>  850/1000   risk = 4.4e-05  time = 52520   
-#>  875/1000   risk = 4.3e-05  time = 54323   
-#>  900/1000   risk = 4.2e-05  time = 56143   
-#>  925/1000   risk = 4e-05  time = 57983   
-#>  950/1000   risk = 3.9e-05  time = 59843   
-#>  975/1000   risk = 3.8e-05  time = 61729   
-#> 1000/1000   risk = 3.7e-05  time = 63637   
+  differences = 2, trace = 200L)
+#>    1/1000   risk = 0.23  time = 0   
+#>  200/1000   risk = 0.022  time = 11262   
+#>  400/1000   risk = 0.021  time = 23511   
+#>  600/1000   risk = 0.021  time = 36757   
+#>  800/1000   risk = 0.021  time = 51116   
+#> 1000/1000   risk = 0.021  time = 67259   
 #> 
 #> 
 #> Train 1000 iterations in 0 Seconds.
-#> Final risk based on the train set: 3.7e-05
+#> Final risk based on the train set: 0.021
 
 all.equal(cboost$baselearner_list$x_spline$factory$getPenaltyMat(),
   host$bl_parts$x_spline$K)

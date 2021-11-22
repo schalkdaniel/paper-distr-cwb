@@ -44,7 +44,7 @@ source(here::here("R/host.R"))
 nsim = 1000L
 x = runif(nsim, 0, 10)
 svec = sample(LETTERS[1:4], nsim, TRUE)
-dat = data.frame(x = x, y = sin(x))
+dat = data.frame(x = x, y = rnorm(nsim, sin(x), 0.2))
 
 # CWB structure:
 bl_spline  = BaselearnerPSpline$new("x", ord = 2)
@@ -160,7 +160,7 @@ A comparison with compboost also shows the correctness of the distributed algori
 devtools::load_all("~/repos/compboost")
 cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
   learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
-  differences = 2)
+  differences = 2, trace = 200L)
 
 all.equal(cboost$baselearner_list$x_spline$factory$getPenaltyMat(),
   host$bl_parts$x_spline$K)
