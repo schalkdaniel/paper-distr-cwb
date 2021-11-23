@@ -31,8 +31,19 @@ Site = R6Class("Site",
         stop("Baselearner already initialized. Call `$unlockBaselearner()` and re initialize.")
 
       ninits = names(ll_init)
+      blc = character()
       for (ni in ninits) {
-        do.call(private$bls[[ni]]$initDesign, c(list(dat = private$data), ll_init[[ni]]))
+        if (! private$bls[[ni]]$isCombination())
+          do.call(private$bls[[ni]]$initDesign, c(list(dat = private$data), ll_init[[ni]]))
+        else
+          blc = c(blc, private$bls[[ni]]$getName())
+      }
+      for (bln in blc) {
+        blc = private$bls[[bln]]
+        do.call(private$bls[[ni]]$initDesign,
+          c(list(dat = private$data,
+            bl1 = private$bls[[blc$getBl1Name()]],
+            bl2 = private$bls[[blc$getBl2Name()]])))
       }
       if (any(! sapply(private$bls, function(bl) bl$isLocked())))
         warning("Not all base learners were initialized.")
@@ -61,21 +72,22 @@ Site = R6Class("Site",
       if ((private$is_initialized_bl + private$is_initialized_offset) == 0)
         stop("Initialize prediction and base learner first.")
 
-      out = lapply(private$bls, function(bl) {
+      out = lapply(private$blsInclude(), function(bl) {
         list(XtX = bl$getXtX(), pen = bl$getPenalty(),
           K = bl$getPenaltyMat(), df = bl$getDF())
       })
+      #names(out) = sapply(private$blsInclude(), function(bl) bl$getName())
       return(out)
     },
     communicateXtu = function() {
       if ((private$is_initialized_bl + private$is_initialized_offset) == 0)
         stop("Initialize prediction and base learner first.")
 
-      out = lapply(private$bls, function(bl) list(Xtu = bl$getXty(private$pr)))
+      out = lapply(private$blsInclude(), function(bl) list(Xtu = bl$getXty(private$pr)))
       return(out)
     },
     communicateInit = function() {
-      out = lapply(bls, function(bl) bl$communicateInit(private$data))
+      out = lapply(private$bls, function(bl) bl$communicateInit(private$data))
       names(out) = names(private$bls)
       return(out)
     },
@@ -83,6 +95,10 @@ Site = R6Class("Site",
     #' @param ... Arguments passed to `aggregator`.
     getAggregatedInitialization = function(aggregator, ...) {
       checkmate::assertFunction(aggregator, args = "y")
+
+      target = private$cwb$getTarget()
+      checkmate::assertChoice(target, choices = colnames(private$data))
+
       out = aggregator(private$data[[private$cwb$getTarget()]], ...)
       checkmate::assertNumeric(out, len = 1L)
       return(out)
@@ -135,7 +151,19 @@ Site = R6Class("Site",
     pred = NULL,
     pr = NULL,
     is_initialized_offset = FALSE,
-    is_initialized_bl = FALSE
+    is_initialized_bl = FALSE,
+    blsInclude = function() {
+      bls_out = list()
+      k = 1
+      for (i in seq_along(private$bls)) {
+        if (private$bls[[i]]$isIncluded()) {
+          bls_out[[k]] = private$bls[[i]]
+          k = k + 1
+        }
+      }
+      names(bls_out) = sapply(bls_out, function(bl) bl$getName())
+      return(bls_out)
+    }
   )
 )
 

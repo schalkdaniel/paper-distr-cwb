@@ -1,0 +1,161 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(
+  collapse   = TRUE,
+  comment    = "#>",
+  fig.path   = "Readme_files/",
+  fig.align  = "center",
+  fig.width  = 6,
+  fig.height = 4,
+  out.width  = "60%",
+  echo       = TRUE,
+  message    = FALSE,
+  warning    = FALSE
+)
+```
+
+```{r}
+library(R6)
+
+source(here::here("R/baselearner.R"))
+source(here::here("R/cwb.R"))
+source(here::here("R/site.R"))
+source(here::here("R/host.R"))
+source(here::here("R/simulate-feature.R"))
+
+# SPECS
+# =======================================================
+
+nsim    = 2000L
+n_sites = 4L
+
+mstop = 2000L
+learning_rate = 0.1
+df = 5
+n_knots = 20L
+
+# SIMULATE DATA
+# =======================================================
+
+set.seed(31415)
+dat = simulateFeature(n = nsim, n_sites = n_sites, bs_dim = 10L, offset = 10)
+SNR = 5
+
+dat$data$ynn = rnorm(nsim, dat$data$y, sd = sd(dat$data$y) / SNR)
+dat$data$site = as.character(dat$data$site)
+
+
+# CWB STRUCTURE
+# =======================================================
+
+bl_spline  = BaselearnerPSpline$new("x", df = df)
+bl_ridge   = BaselearnerRidge$new("site", df = 1, include = FALSE)
+bl_combine = BaselearnerCombine$new(bl_spline, bl_ridge)
+
+# Define base learner list
+bls = list(bl_spline, bl_ridge,  bl_combine)
+
+# Local CWB:
+loss  = function(y, y_pred) 0.5 * (y - y_pred)^2
+dloss = function(y, y_pred) -(y - y_pred)
+
+cwb = CWB$new("ynn", lr = learning_rate, loss = loss, dloss = dloss)
+
+# HOST/SITES
+# =======================================================
+
+# Define sites:
+sites = lapply(unique(dat$data$site), function(s) {
+  Site$new(s, dat$data[dat$data$site == s, c("ynn", "site", "x")], cwb, bls) })
+
+# Define the host:
+host = Host$new(cwb, bls, sites)
+
+
+# DISTR. CWB WORKFLOW
+# =======================================================
+
+## Initialize:
+## ----------------------------------
+
+host$initializePrediction()
+host$initializeBaselearner()
+
+host$offset
+
+## Fitting:
+## ----------------------------------
+
+for (m in seq_len(mstop))
+  host$updateCWB(250L)
+
+host$cwb$blTable()
+
+
+# COMPBOOST COMPARISON
+# =======================================================
+
+devtools::load_all("~/repos/compboost")
+
+dsx = InMemoryData$new(cbind(dat$data$x), "x")
+dsc = CategoricalDataRaw$new(dat$data$site, "site")
+
+blx = compboost::BaselearnerPSpline$new(dsx, "spline", list(df = df, n_knots = n_knots))
+blc = BaselearnerCategoricalRidge$new(dsc, "category", list(df = 1))
+
+tensor1 = BaselearnerTensor$new(blx, blc, "tensor", TRUE)
+
+fl = BlearnerFactoryList$new()
+
+fl$registerFactory(blx)
+fl$registerFactory(tensor1)
+
+loss = LossQuadratic$new()
+optimizer = OptimizerCoordinateDescent$new()
+
+newdata_full  = list(dsx, dsc)
+response_full = ResponseRegr$new("y", cbind(dat$data$y))
+
+log_iterations = LoggerIteration$new("iter", TRUE, mstop)
+log_oob        = LoggerOobRisk$new("oob", TRUE, loss, 0.00, 10, newdata_full, response_full)
+
+# Define new logger list:
+logger_list = LoggerList$new()
+
+# Register the logger:
+logger_list$registerLogger(log_iterations)
+logger_list$registerLogger(log_oob)
+
+cboost = Compboost_internal$new(
+  response      = ResponseRegr$new("y", cbind(dat$data$ynn)),
+  learning_rate = learning_rate,
+  stop_if_all_stopper_fulfilled = FALSE,
+  factory_list = fl,
+  loss         = loss,
+  logger_list  = logger_list,
+  optimizer    = optimizer
+)
+
+cboost$train(trace = 500)
+
+
+
+## Compare estimates:
+## --------------------------------------
+
+host$cwb$blTable()
+table(cboost$getSelectedBaselearner())
+
+cfd = host$cwb$getBlMap()
+cfc = cboost$getEstimatedParameter()
+
+all.equal(as.matrix(cfd[["x<<>>site_combine"]]), cfc[["x_site_tensor"]], check.attributes = FALSE)
+all.equal(as.matrix(cfd[["x_spline"]]), cfc[["x_spline"]], check.attributes = FALSE)
+
+all.equal(cboost$getRiskVector()[-1], host$risk)
+```

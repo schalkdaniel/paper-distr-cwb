@@ -7,7 +7,7 @@ aggrParts = function(bl_parts) {
     XtX = Reduce("+", lapply(blp, function(b) b$XtX))
     K   = blp[[1]]$K
     df  = blp[[1]]$df
-    pen = compboostSplines::demmlerReinsch(XtX, K, df)
+    pen = compboostSplines::demmlerReinsch(as.matrix(XtX), K, df)
 
     out = list(XtX = XtX, K = K, df = df, pen = pen)
     return(out)
@@ -41,21 +41,26 @@ estimateParam = function(aggr_parts, aggr_xtu) {
 Host = R6Class("Host",
   public = list(
     initialize = function(cwb, bls, sites) {
-      private$p_cwb = cwb
-      private$p_bls = bls
+      private$p_cwb   = cwb
+      private$p_bls   = bls
       private$p_sites = sites
       private$p_blns  = sapply(private$p_bls, function(bl) bl$getName())
+      names(private$p_bls) = private$p_blns
     },
     initializeBaselearner = function() {
       init = lapply(sites, function(site) site$communicateInit())
       init_aggr = lapply(private$p_blns, function(bln) {
         sinit = lapply(init, function(i) i[[bln]])
+        out = list(dummy = 0)
         if (grepl("spline", bln)) {
           smin = min(sapply(sinit, function(s) s$min))
           smax = max(sapply(sinit, function(s) s$max))
-          out = compboostSplines::createKnots(c(smin, smax), n_knots = 10L, degree = 2)
+          knots = private$p_bls[[bln]]$createKnots(c(smin, smax))
+          out = list(knots = knots)
         }
-        out = list(knots = out)
+        if (grepl("ridge", bln)) {
+          out = list(classes = unname(unlist(sinit)))
+        }
         return(out)
       })
       names(init_aggr) = private$p_blns
@@ -77,25 +82,45 @@ Host = R6Class("Host",
       bl_parts = lapply(private$p_sites, function(s) s$communicateFittingParts())
       private$p_bl_parts = aggrParts(bl_parts)
     },
-    updateCWB = function(m = NULL) {
+    updateCWB = function(trace = 1L) {
+      m = length(private$p_cwb$getBlTrace())
+
+      if (! m %% trace)
+        cat("> ", m, ":\n", sep = "")
 
       # Calculate params
+      if (! m %% trace)
+        cat("  >> Receive X^Tu from all sites for all base learners\n")
+
       xtus     = lapply(private$p_sites, function(s) s$communicateXtu())
       aggr_xtu = aggrXtu(xtus)
+
+      if (! m %% trace)
+        cat("  >> Aggregate to get global parameter estimates for all base learners\n")
+
       blparams = estimateParam(private$p_bl_parts, aggr_xtu)
 
       # Get SSEs:
-      sses = sapply(private$p_blns, function(bln) {
+      if (! m %% trace)
+        cat("  >> Send best parameters to sites to get SSEs\n")
+
+      idx_bls_included = sapply(private$p_bls, function(bl) bl$isIncluded())
+      sses = sapply(private$p_blns[idx_bls_included], function(bln) {
         bp = blparams[[bln]]
         sum(sapply(private$p_sites, function(s) {
           s$ssePrUpdate(bln, bp)
         }))
       })
-      names(sses) = private$p_blns
+      names(sses) = private$p_blns[idx_bls_included]
 
       bl_best = which.min(sses)
+      if (! m %% trace)
+        cat("  >> Found best base learner:", names(bl_best), "\n")
 
       # Site models:
+      if (! m %% trace)
+        cat("  >> Send parameter of best base learner to site to update CWB\n")
+
       nuisance = lapply(private$p_sites, function(s) {
         s$update(names(bl_best), blparams[[names(bl_best)]])
       })
@@ -104,7 +129,9 @@ Host = R6Class("Host",
 
       sw = sapply(private$p_sites, function(s) s$nrow())
       private$p_risk = c(private$p_risk, weighted.mean(sapply(private$p_sites, function(s) s$communicateRisk()), sw))
-      cat(m, ": ", tail(private$p_risk, 1), "\n", sep = "")
+
+      if (! m %% trace)
+        cat("  >> Risk:", tail(private$p_risk, 1), "\n")
     }
   ),
   private = list(

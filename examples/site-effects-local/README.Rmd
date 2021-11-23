@@ -118,7 +118,7 @@ logger_list$registerLogger(log_iterations)
 logger_list$registerLogger(log_oob)
 
 cboost = Compboost_internal$new(
-  response      = ResponseRegr$new("y", cbind(dat$data$yn)),
+  response      = ResponseRegr$new("y", cbind(dat$data$ynn)),
   learning_rate = learning_rate,
   stop_if_all_stopper_fulfilled = FALSE,
   factory_list = fl,

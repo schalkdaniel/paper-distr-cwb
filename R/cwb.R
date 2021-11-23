@@ -26,7 +26,12 @@ CWB = R6Class("CWB",
       private$bl_map[[bln]] = private$bl_map[[bln]] + private$lr * param
     },
     linPred = function(bls) {
-      blLinPred = function(bl) bl$linPred(private$bl_map[[bl$getName()]])
+      blLinPred = function(bl) {
+        if (! is.null(private$bl_map[[bl$getName()]]))
+          return(bl$linPred(private$bl_map[[bl$getName()]]))
+        else
+          return(0)
+      }
       pred = rowSums(do.call(cbind, lapply(bls, blLinPred)))
       return(pred)
     },
@@ -42,8 +47,14 @@ CWB = R6Class("CWB",
     getBlMap = function() {
       return(private$bl_map)
     },
-    getBlTrace = function() {
+    getBlTrace = function(just_names = FALSE) {
+      if (just_names)
+        return(vapply(private$bl_trace, function(blt) blt$name, character(1L)))
+
       return(private$bl_trace)
+    },
+    blTable = function() {
+      return(table(self$getBlTrace(just_names = TRUE)))
     }
   ),
   private = list(

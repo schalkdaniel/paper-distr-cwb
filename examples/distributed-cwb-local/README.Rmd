@@ -44,16 +44,16 @@ source(here::here("R/host.R"))
 nsim = 1000L
 x = runif(nsim, 0, 10)
 svec = sample(LETTERS[1:4], nsim, TRUE)
-dat = data.frame(x = x, y = rnorm(nsim, sin(x), 0.2))
+dat = data.frame(x = x, y = rnorm(nsim, sin(x), 0.2), site = svec)
 
 # CWB structure:
 bl_spline  = BaselearnerPSpline$new("x", ord = 2)
-#bl_ridge   =
+bl_ridge   = BaselearnerRidge$new("site", df = 1)
 #bl_combine =
 
 # Define base learner list
 #bls = list(bl_spline, bl_combine)
-bls = list(bl_spline)
+bls = list(bl_spline, bl_ridge)
 
 # Local CWB:
 loss  = function(y, y_pred) 0.5 * (y - y_pred)^2
@@ -118,11 +118,8 @@ __Note:__ Finding the best base learner requires multiple communication steps:
 
 ```{r}
 mstop = 1000L
-trace = character()
-for (m in seq_len(mstop)) {
-  trace = c(trace, capture.output(host$updateCWB(m)))
-}
-cat(tail(trace), sep = "")
+for (m in seq_len(mstop))
+  host$updateCWB(200L)
 ```
 
 ## Check the algorithm
@@ -142,8 +139,12 @@ Visualizing the estimated effect reveals an accurate effect estimation:
 blst = bls
 d0 = dat
 
-lapply(blst, function(bl) bl$initDesign(d0, host$init_aggr$x_spline$knots))
-d0$pred = host$offset + blst[[1]]$linPred(host$cwb$getBlMap()[["x_spline"]])
+blst[[1]]$initDesign(d0, host$init_aggr$x_spline$knots)
+blst[[2]]$initDesign(d0, host$init_aggr$site_ridge$classes)
+
+d0$pred = host$offset +
+  blst[[1]]$linPred(host$cwb$getBlMap()[["x_spline"]]) +
+  blst[[2]]$linPred(host$cwb$getBlMap()[["site_ridge"]])
 
 library(ggplot2)
 
@@ -160,23 +161,29 @@ A comparison with compboost also shows the correctness of the distributed algori
 devtools::load_all("~/repos/compboost")
 cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
   learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
-  differences = 2, trace = 200L)
+  differences = 2, trace = 200L, df_cat = 2)
 
+all.equal(cboost$baselearner_list$site_ridge$factory$getPenaltyMat(),
+  host$bl_parts$site_ridge$K)
 all.equal(cboost$baselearner_list$x_spline$factory$getPenaltyMat(),
   host$bl_parts$x_spline$K)
 
 all.equal(cboost$baselearner_list$x_spline$factory$getPenalty(),
   host$bl_parts$x_spline$pen)
+all.equal(cboost$baselearner_list$site_ridge$factory$getPenalty(),
+  host$bl_parts$site_ridge$pen)
 
 all.equal(check.attributes = FALSE,
   cboost$baselearner_list$x_spline$factory$getData() %*%
     t(cboost$baselearner_list$x_spline$factory$getData()),
   host$bl_parts$x_spline$XtX)
 
+
 cf_cboost = cboost$getEstimatedCoef()
 cf_dist   = host$cwb$getBlMap()
 
 all.equal(cf_cboost$offset, host$offset)
 all.equal(cf_cboost$x_spline, cf_dist$x_spline, check.attributes = FALSE)
+all.equal(cf_cboost$site_ridge, cf_dist$site_ridge, check.attributes = FALSE)
 all.equal(cboost$model$getRiskVector()[-1], host$risk)
 ```
