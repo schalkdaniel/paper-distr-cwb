@@ -31,12 +31,10 @@ svec = sample(LETTERS[1:4], nsim, TRUE)
 dat = data.frame(x = x, y = rnorm(nsim, sin(x), 0.2), site = svec)
 
 # CWB structure:
-bl_spline  = BaselearnerPSpline$new("x", ord = 2)
+bl_spline  = BaselearnerPSpline$new("x", df = 4)
 bl_ridge   = BaselearnerRidge$new("site", df = 1)
-#bl_combine =
 
 # Define base learner list
-#bls = list(bl_spline, bl_combine)
 bls = list(bl_spline, bl_ridge)
 
 # Local CWB:
@@ -87,24 +85,24 @@ F_j = \sum_{k=1}^K F_{k,j}, \qquad F_{k,j} = X_{k,j}^TX_{k,j}
 str(host$init_aggr)
 #> List of 2
 #>  $ x_spline  :List of 1
-#>   ..$ knots: num [1:26, 1] -0.9396 -0.4641 0.0114 0.4868 0.9623 ...
+#>   ..$ knots: num [1:28, 1] -1.41404 -0.93938 -0.46473 0.00993 0.48458 ...
 #>  $ site_ridge:List of 1
-#>   ..$ classes: chr [1:4] "D" "A" "C" "B"
+#>   ..$ classes: chr [1:4] "A" "C" "B" "D"
 str(host$bl_parts)
 #> List of 2
 #>  $ x_spline  :List of 4
-#>   ..$ XtX: num [1:23, 1:23] 2.856 6.144 0.439 0 0 ...
-#>   ..$ K  : num [1:23, 1:23] 1 -2 1 0 0 0 0 0 0 0 ...
+#>   ..$ XtX: num [1:24, 1:24] 0.236 1.416 0.625 0.01 0 ...
+#>   ..$ K  : num [1:24, 1:24] 1 -2 1 0 0 0 0 0 0 0 ...
 #>   ..$ df : num 4
-#>   ..$ pen: num 4274
+#>   ..$ pen: num 4163
 #>  $ site_ridge:List of 4
-#>   ..$ XtX: num [1:4, 1:4] 240 0 0 0 0 237 0 0 0 0 ...
+#>   ..$ XtX: num [1:4, 1:4] 257 0 0 0 0 226 0 0 0 0 ...
 #>   ..$ K  : num [1:4, 1:4] 1 0 0 0 0 1 0 0 0 0 ...
 #>   ..$ df : num 1
 #>   ..$ pen: num 1615
 
 host$offset
-#> [1] 0.1513
+#> [1] 0.1763
 ```
 
 ## Fitting stage
@@ -132,35 +130,35 @@ for (m in seq_len(mstop))
 #>   >> Send best parameters to sites to get SSEs
 #>   >> Found best base learner: x_spline 
 #>   >> Send parameter of best base learner to site to update CWB
-#>   >> Risk: 0.2238 
+#>   >> Risk: 0.2292 
 #> > 200:
 #>   >> Receive X^Tu from all sites for all base learners
 #>   >> Aggregate to get global parameter estimates for all base learners
 #>   >> Send best parameters to sites to get SSEs
 #>   >> Found best base learner: x_spline 
 #>   >> Send parameter of best base learner to site to update CWB
-#>   >> Risk: 0.02117 
+#>   >> Risk: 0.02303 
 #> > 400:
 #>   >> Receive X^Tu from all sites for all base learners
 #>   >> Aggregate to get global parameter estimates for all base learners
 #>   >> Send best parameters to sites to get SSEs
 #>   >> Found best base learner: x_spline 
 #>   >> Send parameter of best base learner to site to update CWB
-#>   >> Risk: 0.0201 
+#>   >> Risk: 0.02203 
 #> > 600:
 #>   >> Receive X^Tu from all sites for all base learners
 #>   >> Aggregate to get global parameter estimates for all base learners
 #>   >> Send best parameters to sites to get SSEs
 #>   >> Found best base learner: x_spline 
 #>   >> Send parameter of best base learner to site to update CWB
-#>   >> Risk: 0.02 
+#>   >> Risk: 0.02198 
 #> > 800:
 #>   >> Receive X^Tu from all sites for all base learners
 #>   >> Aggregate to get global parameter estimates for all base learners
 #>   >> Send best parameters to sites to get SSEs
-#>   >> Found best base learner: site_ridge 
+#>   >> Found best base learner: x_spline 
 #>   >> Send parameter of best base learner to site to update CWB
-#>   >> Risk: 0.01996
+#>   >> Risk: 0.02196
 ```
 
 ## Check the algorithm
@@ -176,17 +174,17 @@ str(host$cwb$getBlTrace()[1:3])
 #> List of 3
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:23, 1] 0.655 0.557 0.457 0.35 0.231 ...
+#>   ..$ param: num [1:24, 1] 0.701 0.603 0.505 0.404 0.292 ...
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:23, 1] 0.595 0.507 0.419 0.324 0.216 ...
+#>   ..$ param: num [1:24, 1] 0.635 0.549 0.462 0.372 0.271 ...
 #>  $ :List of 2
 #>   ..$ name : chr "x_spline"
-#>   ..$ param: num [1:23, 1] 0.539 0.462 0.384 0.299 0.202 ...
+#>   ..$ param: num [1:24, 1] 0.574 0.499 0.422 0.342 0.252 ...
 str(host$cwb$getBlMap())
 #> List of 2
-#>  $ x_spline  : num [1:23, 1] -0.297 0.113 0.499 0.776 0.859 ...
-#>  $ site_ridge: num [1:4, 1] -0.0014 0.00237 0.0129 -0.01367
+#>  $ x_spline  : num [1:24, 1] -0.518 -0.116 0.28 0.617 0.813 ...
+#>  $ site_ridge: num [1:4, 1] -0.006804 -0.000465 0.006286 0.000978
 ```
 
 Visualizing the estimated effect reveals an accurate effect estimation:
@@ -221,38 +219,37 @@ distributed algorithm:
 ## Compare to compboost:
 devtools::load_all("~/repos/compboost")
 cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
-  learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
-  differences = 2, trace = 200L, df_cat = 2)
-#>    1/1000   risk = 0.22  time = 0   
-#>  200/1000   risk = 0.021  time = 18110   
-#>  400/1000   risk = 0.02  time = 33627   
-#>  600/1000   risk = 0.02  time = 48166   
-#>  800/1000   risk = 0.02  time = 63844   
-#> 1000/1000   risk = 0.02  time = 80810   
+  learning_rate = 0.1, iterations = 1000L, df = 4, trace = 200L, df_cat = 1)
+#>    1/1000   risk = 0.23  time = 0   
+#>  200/1000   risk = 0.023  time = 14561   
+#>  400/1000   risk = 0.022  time = 30043   
+#>  600/1000   risk = 0.022  time = 46300   
+#>  800/1000   risk = 0.022  time = 63761   
+#> 1000/1000   risk = 0.022  time = 82505   
 #> 
 #> 
 #> Train 1000 iterations in 0 Seconds.
-#> Final risk based on the train set: 0.02
+#> Final risk based on the train set: 0.022
 
 all.equal(cboost$baselearner_list$site_ridge$factory$getPenaltyMat(),
   host$bl_parts$site_ridge$K)
 #> [1] TRUE
 all.equal(cboost$baselearner_list$x_spline$factory$getPenaltyMat(),
   host$bl_parts$x_spline$K)
-#> [1] "Attributes: < Component \"dim\": Mean relative difference: 0.7692 >" "Numeric: lengths (169, 529) differ"
+#> [1] TRUE
 
 all.equal(cboost$baselearner_list$x_spline$factory$getPenalty(),
   host$bl_parts$x_spline$pen)
-#> [1] "Mean relative difference: 6.427"
+#> [1] TRUE
 all.equal(cboost$baselearner_list$site_ridge$factory$getPenalty(),
   host$bl_parts$site_ridge$pen)
-#> [1] "Mean relative difference: 1.679"
+#> [1] TRUE
 
 all.equal(check.attributes = FALSE,
   cboost$baselearner_list$x_spline$factory$getData() %*%
     t(cboost$baselearner_list$x_spline$factory$getData()),
   host$bl_parts$x_spline$XtX)
-#> [1] "Numeric: lengths (169, 529) differ"
+#> [1] TRUE
 
 
 cf_cboost = cboost$getEstimatedCoef()
@@ -261,9 +258,9 @@ cf_dist   = host$cwb$getBlMap()
 all.equal(cf_cboost$offset, host$offset)
 #> [1] TRUE
 all.equal(cf_cboost$x_spline, cf_dist$x_spline, check.attributes = FALSE)
-#> [1] "Numeric: lengths (13, 23) differ"
+#> [1] TRUE
 all.equal(cf_cboost$site_ridge, cf_dist$site_ridge, check.attributes = FALSE)
-#> [1] "Mean relative difference: 0.09499"
+#> [1] TRUE
 all.equal(cboost$model$getRiskVector()[-1], host$risk)
-#> [1] "Mean relative difference: 0.003529"
+#> [1] TRUE
 ```

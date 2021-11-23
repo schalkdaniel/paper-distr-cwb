@@ -47,12 +47,10 @@ svec = sample(LETTERS[1:4], nsim, TRUE)
 dat = data.frame(x = x, y = rnorm(nsim, sin(x), 0.2), site = svec)
 
 # CWB structure:
-bl_spline  = BaselearnerPSpline$new("x", ord = 2)
+bl_spline  = BaselearnerPSpline$new("x", df = 4)
 bl_ridge   = BaselearnerRidge$new("site", df = 1)
-#bl_combine =
 
 # Define base learner list
-#bls = list(bl_spline, bl_combine)
 bls = list(bl_spline, bl_ridge)
 
 # Local CWB:
@@ -160,8 +158,7 @@ A comparison with compboost also shows the correctness of the distributed algori
 ## Compare to compboost:
 devtools::load_all("~/repos/compboost")
 cboost = boostSplines(data = dat, target = "y", loss = LossQuadratic$new(),
-  learning_rate = 0.1, iterations = 1000L, n_knots = 10, df = 4, degree = 2,
-  differences = 2, trace = 200L, df_cat = 2)
+  learning_rate = 0.1, iterations = 1000L, df = 4, trace = 200L, df_cat = 1)
 
 all.equal(cboost$baselearner_list$site_ridge$factory$getPenaltyMat(),
   host$bl_parts$site_ridge$K)
