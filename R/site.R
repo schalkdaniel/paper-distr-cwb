@@ -1,163 +1,293 @@
 library(R6)
 
-#source(here::here("R/baselearner.R"))
-#source(here::here("R/cwb.R"))
-
+#' @title Site class
+#'
+#' @description
+#' This class simulates the sites or servers with individual data.
+#' It defines what gets shared and received by the host.
+#'
+#' @export
 Site = R6Class("Site",
   public = list(
-    #' @param name [`character(1L)`] Name of the site.
-    #' @param data [`data.frame()`] Data frame exclusively hold by the server.
-    #' @param cwb [`CWB`] Object of R6 class CWB.
-    #' @param bls [`list()`] List of object of R6 class base learner.
+    #' @description
+    #' Creates a new instance of this [R6][R6::R6Class] class.
+    #'
+    #' @param name (`character(1L)`)\cr
+    #'   Name of the site.
+    #' @param data (`data.frame()`)\cr
+    #'   Data frame exclusively hold by the server.
+    #' @param cwb (`[CWB]`)\cr
+    #'   Object of R6 class CWB.
+    #' @param bls (`list()`)\cr
+    #'   List of object of R6 class base learner.
     initialize = function(name, data, cwb, bls) {
       checkmate::assertCharacter(name, len = 1L)
       checkmate::assertDataFrame(data)
       checkmate::assertR6(cwb, "CWB")
       nuisance = lapply(bls, function(bl) checkmate::assertR6(bl, "Baselearner"))
 
-      private$name = name
-      private$data = data
-      private$cwb  = cwb$clone()
+      private$p_name = name
+      private$p_data = data
+      private$p_cwb  = cwb$clone()
 
-      private$bls = lapply(bls, function(bl) bl$clone(deep = TRUE))
-      names(private$bls) = vapply(private$bls, FUN.VALUE = character(1L),
+      private$p_bls = lapply(bls, function(bl) bl$clone(deep = TRUE))
+      names(private$p_bls) = vapply(private$p_bls, FUN.VALUE = character(1L),
         FUN = function(bl) bl$getName())
+      return(invisible(NULL))
     },
+
+    #' @description
+    #' Get the name of the base learners.
+    #'
+    #' @return
+    #'   Returns the base learner name as character value.
     baselearnerNames = function() {
-      return(names(private$bls))
+      return(names(private$p_bls))
     },
+
+    #' @description
+    #' Initialize all base learners.
+    #'
+    #' @param ll_init (`list()`)\cr
+    #'   List containing the information to initialize the
+    #'   base learners (such as knots or classes).
     initBaselearner = function(ll_init) {
-      if (private$is_initialized_bl)
+      if (private$p_is_initialized_bl)
         stop("Baselearner already initialized. Call `$unlockBaselearner()` and re initialize.")
 
       ninits = names(ll_init)
       blc = character()
       for (ni in ninits) {
-        if (! private$bls[[ni]]$isCombination())
-          do.call(private$bls[[ni]]$initDesign, c(list(dat = private$data), ll_init[[ni]]))
+        if (! private$p_bls[[ni]]$isCombination())
+          do.call(private$p_bls[[ni]]$initDesign, c(list(dat = private$p_data), ll_init[[ni]]))
         else
-          blc = c(blc, private$bls[[ni]]$getName())
+          blc = c(blc, private$p_bls[[ni]]$getName())
       }
       for (bln in blc) {
-        blc = private$bls[[bln]]
-        do.call(private$bls[[ni]]$initDesign,
-          c(list(dat = private$data,
-            bl1 = private$bls[[blc$getBl1Name()]],
-            bl2 = private$bls[[blc$getBl2Name()]])))
+        blc = private$p_bls[[bln]]
+        do.call(private$p_bls[[ni]]$initDesign,
+          c(list(dat = private$p_data,
+            bl1 = private$p_bls[[blc$getBl1Name()]],
+            bl2 = private$p_bls[[blc$getBl2Name()]])))
       }
-      if (any(! sapply(private$bls, function(bl) bl$isLocked())))
+      if (any(! sapply(private$p_bls, function(bl) bl$isLocked())))
         warning("Not all base learners were initialized.")
-      private$is_initialized_bl = TRUE
+      private$p_is_initialized_bl = TRUE
       return(invisible(NULL))
     },
+
+    #' @description
+    #' Make the base learner "editable", meaning that it can be
+    #' initialized.
     unlockBaselearner = function() {
-      private$is_initialized_bl = FALSE
+      private$p_is_initialized_bl = FALSE
       return(invisible(NULL))
     },
+
+    #' @description
+    #' Communicate (get) the risk of this site.
     communicateRisk = function() {
-      return(private$cwb$risk(private$data[[private$cwb$getTarget()]], private$pred))
+      return(private$p_cwb$risk(private$p_data[[private$p_cwb$getTarget()]], private$p_pred))
     },
-    #' @param bln [`character(1L)`] Name of the base learner to update
-    #' @param param [`numeric()`] Parameter update.
+
+    #' @description
+    #' Update the CWB model.
+    #'
+    #' @param bln (`character(1L)`)\cr
+    #'   Name of the base learner to update
+    #' @param param (`numeric()`)\cr
+    #'   Parameter update.
     update = function(bln, param) {
-      checkmate::assertChoice(bln, choices = names(private$bls))
-      private$cwb$update(bln, param)
-      private$pred = private$offset + private$cwb$linPred(private$bls)
-      private$pr = private$cwb$pseudoResiduals(
-        y = private$data[[private$cwb$getTarget()]], y_pred = private$pred)
+      checkmate::assertChoice(bln, choices = names(private$p_bls))
+      private$p_cwb$update(bln, param)
+      private$p_pred = private$p_offset + private$p_cwb$linPred(private$p_bls)
+      private$p_pr = private$p_cwb$pseudoResiduals(
+        y = private$p_data[[private$p_cwb$getTarget()]], y_pred = private$p_pred)
 
       return(invisible(NULL))
     },
+
+    #' @description
+    #' Communicate (get) the static part of the base learner.
+    #' Static parts are X^TX, the degrees of freedom, penalty,
+    #' and the penalty matrix.
+    #'
+    #' @return
+    #'   Returns list containing the static parts per base learner.
     communicateFittingParts = function() {
-      if ((private$is_initialized_bl + private$is_initialized_offset) == 0)
+      if ((private$p_is_initialized_bl + private$p_is_initialized_offset) == 0)
         stop("Initialize prediction and base learner first.")
 
-      out = lapply(private$blsInclude(), function(bl) {
+      out = lapply(private$pBlsInclude(), function(bl) {
         list(XtX = bl$getXtX(), pen = bl$getPenalty(),
           K = bl$getPenaltyMat(), df = bl$getDF())
       })
-      #names(out) = sapply(private$blsInclude(), function(bl) bl$getName())
       return(out)
     },
+
+    #' @description
+    #' Communicate (get) the dynamic part X^Tu which changes after each
+    #' update due to the adjustment of the pseudo residuals.
+    #'
+    #' @return
+    #'   Returns list containing X^Tu of the current state of the model.
     communicateXtu = function() {
-      if ((private$is_initialized_bl + private$is_initialized_offset) == 0)
+      if ((private$p_is_initialized_bl + private$p_is_initialized_offset) == 0)
         stop("Initialize prediction and base learner first.")
 
-      out = lapply(private$blsInclude(), function(bl) list(Xtu = bl$getXty(private$pr)))
+      out = lapply(private$pBlsInclude(), function(bl) list(Xtu = bl$getXty(private$p_pr)))
       return(out)
     },
+
+    #' @description
+    #' Communicate (get) the parts required to calculate a "global"
+    #' initialization. For splines, this is the minimal and maximum of a feature
+    #' wihle the classes are communicated for the ridge base learner.
+    #'
+    #' @return
+    #'   Returns list the initialization parts for each base learner.
     communicateInit = function() {
-      out = lapply(private$bls, function(bl) bl$communicateInit(private$data))
-      names(out) = names(private$bls)
+      out = lapply(private$p_bls, function(bl) bl$communicateInit(private$p_data))
+      names(out) = names(private$p_bls)
       return(out)
     },
-    #' @param aggregator [`function(y)`] Loss optimal initialization depending on y.
-    #' @param ... Arguments passed to `aggregator`.
+
+    #' @description
+    #' Calculate the constant initialization.
+    #'
+    #' @param aggregator (`function(y)`)\cr
+    #'   Loss optimal initialization depending on y.
+    #' @param ... \cr
+    #'   Arguments passed to `aggregator`.
+    #'
+    #' @return
+    #'   Aggregated value by calling the `aggregator` on the site data.
     getAggregatedInitialization = function(aggregator, ...) {
       checkmate::assertFunction(aggregator, args = "y")
 
-      target = private$cwb$getTarget()
-      checkmate::assertChoice(target, choices = colnames(private$data))
+      target = private$p_cwb$getTarget()
+      checkmate::assertChoice(target, choices = colnames(private$p_data))
 
-      out = aggregator(private$data[[private$cwb$getTarget()]], ...)
+      out = aggregator(private$p_data[[private$p_cwb$getTarget()]], ...)
       checkmate::assertNumeric(out, len = 1L)
       return(out)
     },
-    #' @param penalty [`numeric(1L)`] Penalty used for each base learner
-    initPenalty = function(penalty) {
-      checkmate::assertNumeric(penalty, len = 1L, lower = 0)
-      nuisance = lapply(private$bls, function(bl) bl$setPenalty(penalty))
-      return(invisible(NULL))
-    },
-    #' @param offset [`numeric(1L)`] Constant initialization for the prediction
+
+    #' @description
+    #' Initialize the prediction and pseudo residuals on the site.
+    #'
+    #' @param offset (`numeric(1L)`)\cr
+    #'   Constant initialization for the prediction.
     initPrediction = function(offset) {
-      if (private$is_initialized_offset) stop("Prediction is already initialized.")
+      if (private$p_is_initialized_offset) stop("Prediction is already initialized.")
       checkmate::assertNumeric(offset, len = 1L)
-      private$offset = offset
-      private$pred = rep(offset, nrow(private$data))
-      private$is_initialized_offset = TRUE
-      private$pr = private$cwb$pseudoResiduals(
-        y = private$data[[private$cwb$getTarget()]], y_pred = private$pred)
+      private$p_offset = offset
+      private$p_pred = rep(offset, nrow(private$p_data))
+      private$p_is_initialized_offset = TRUE
+      private$p_pr = private$p_cwb$pseudoResiduals(
+        y = private$p_data[[private$p_cwb$getTarget()]], y_pred = private$p_pred)
 
       return(invisible(NULL))
     },
+
+    #' @description
+    #' Get the sum of squared errors of the current model state.
+    #'
+    #' @return
+    #'   The sum of squared errors as numeric value.
     sse = function() {
-      return(sum((private$data[[private$cwb$getTarget()]] - private$pred)^2))
+      return(sum((private$p_data[[private$p_cwb$getTarget()]] - private$p_pred)^2))
     },
+
+    #' @description
+    #' Get the sum of squared errors of a base learner with parameter
+    #' vector `param` and the pseudo residuals. This is required to
+    #' get the best base learner in one iteration.
+    #'
+    #' @return
+    #'   The sum of squared errors as numeric value.
     ssePrUpdate = function(bln, param) {
-      checkmate::assertChoice(bln, choices = names(private$bls))
-      return(sum((private$pr - private$bls[[bln]]$linPred(param))^2))
+      checkmate::assertChoice(bln, choices = names(private$p_bls))
+      return(sum((private$p_pr - private$p_bls[[bln]]$linPred(param))^2))
     },
+
+    #' @description
+    #' Get the number of columns of the site data.
+    #'
+    #' @return
+    #'   Integer value containing the number of columns.
     ncol = function() {
-      return(ncol(private$data))
+      return(ncol(private$p_data))
     },
+
+    #' @description
+    #' Get the number of rows of the site data.
+    #'
+    #' @return
+    #'   Integer value containing the number of rows
     nrow = function() {
-      return(nrow(private$data))
-    },
-    ### ATM JUST FOR TESTING, NEEDS TO BE REMOVED FOR A REALISTIC SETUP
-    getPR = function() {
-      return(private$pr)
-    },
-    getPred = function() {
-      return(private$pred)
+      return(nrow(private$p_data))
     }
+
+    ### JUST FOR TESTING, NEEDS TO BE REMOVED FOR A REALISTIC SETUP
+    #getPR = function() {
+      #return(private$p_pr)
+    #},
+    #getPred = function() {
+      #return(private$p_pred)
+    #}
   ),
   private = list(
-    name = NULL,
-    data = NULL,
-    bls = NULL,
-    cwb = NULL,
-    offset = NULL,
-    pred = NULL,
-    pr = NULL,
-    is_initialized_offset = FALSE,
-    is_initialized_bl = FALSE,
-    blsInclude = function() {
+
+    #' @field p_name (`character(1L`)\cr
+    #'   Name/id of the site.
+    p_name = NULL,
+
+    #' @field p_data (`data.frame()`)\cr
+    #'   Site data.
+    p_data = NULL,
+
+    #' @field p_bls (`list([Baselearner])`)\cr
+    #'   List of [Baselearner]s.
+    p_bls = NULL,
+
+    #' @field p_cwb (`[CWB]`)\cr
+    #'   Site CWB model (same as the hots CWB model).
+    p_cwb = NULL,
+
+    #' @field p_offset (`numeric(1L`)\cr
+    #'   Offset of the site (or global offset over multiple sites).
+    p_offset = NULL,
+
+    #' @field p_pred (`numeric()`)\cr
+    #'   Prediction of the current model state.
+    p_pred = NULL,
+
+    #' @field p_pr (`numeric()`)\cr
+    #'   Pseudo residuals of the current model state.
+    p_pr = NULL,
+
+    #' @field p_is_initialized_offset (`logical(1L)`)\cr
+    #'   Flag indicating whether the offset and hence prediction
+    #'   is initialized or not.
+    p_is_initialized_offset = FALSE,
+
+    #' @field p_is_initialized_bl (`logical(1L)`)\cr
+    #'   Flag indicating whether the base learner are initilized or not.
+    p_is_initialized_bl = FALSE,
+
+    #' @description
+    #' Get the base learners that are used for modelling.
+    #' I.e. the base learners with the `include = TRUE` flag.
+    #'
+    #' @return
+    #'   List containing the base learners.
+    pBlsInclude = function() {
       bls_out = list()
       k = 1
-      for (i in seq_along(private$bls)) {
-        if (private$bls[[i]]$isIncluded()) {
-          bls_out[[k]] = private$bls[[i]]
+      for (i in seq_along(private$p_bls)) {
+        if (private$p_bls[[i]]$isIncluded()) {
+          bls_out[[k]] = private$p_bls[[i]]
           k = k + 1
         }
       }
